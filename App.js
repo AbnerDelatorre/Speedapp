@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { memo, useEffect, useRef, useState } from 'react';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useKeepAwake } from 'expo-keep-awake';
-import { DEFAULT_SETTINGS, G0, clamp, convertSpeed } from './src/volume';
-import { resetPeak, start, state, stop } from './src/engine';
+import { DEFAULT_SETTINGS, G0, clamp, convertRange, convertSpeed } from './src/volume';
+import { cleanupStale, resetPeak, start, state, stop } from './src/engine';
 
 // Palette: late-90s Japanese sports car cabin at night, taped on VHS.
 // Black gauge faces, warm white print, amber illumination, orange needles, green VFD.
@@ -90,6 +90,15 @@ function GBall({ size, lat, long }) {
   );
 }
 
+// Static, so memoized: the dash re-renders ~7x a second and must not rebuild 240 views each time.
+const Scanlines = memo(function Scanlines() {
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {Array.from({ length: 240 }, (_, i) => <View key={i} style={s.scan} />)}
+    </View>
+  );
+});
+
 /** Camcorder on-screen display + scanlines: the whole thing is "taped". */
 function TapeOverlay({ running }) {
   const [now, setNow] = useState(new Date());
@@ -99,7 +108,7 @@ function TapeOverlay({ running }) {
   const blink = now.getSeconds() % 2 === 0;
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      {Array.from({ length: 240 }, (_, i) => <View key={i} style={s.scan} />)}
+      <Scanlines />
       <Text style={[s.osd, { top: 54, left: 18 }]}>{running ? `REC ${blink ? '●' : ' '}` : 'STBY ❙❙'}</Text>
       <Text style={[s.osd, { top: 54, right: 18 }]}>SP</Text>
       <Text style={[s.osd, s.osdStamp]}>
@@ -141,7 +150,10 @@ export default function App() {
   const [volume, setVolume] = useState(DEFAULT_SETTINGS.minVolume);
   const [error, setError] = useState(null);
 
-  state.settings = settings;
+  const busy = useRef(false);
+
+  useEffect(() => { state.settings = settings; }, [settings]);
+  useEffect(() => { cleanupStale(); }, []);
 
   // Refresh the on-screen numbers (the engine itself runs in src/engine.js).
   useEffect(() => {
@@ -151,14 +163,24 @@ export default function App() {
   }, []);
 
   async function toggle() {
+    if (busy.current) return; // ignore double taps while starting/stopping
+    busy.current = true;
     setError(null);
     try {
       if (running) { await stop(); setRunning(false); }
       else { await start(); setRunning(true); }
-    } catch (e) { setError(String(e.message ?? e)); }
+    } catch (e) {
+      await stop().catch(() => {}); // don't leave sensors half-started
+      setRunning(false);
+      setError(String(e.message ?? e));
+    } finally { busy.current = false; }
   }
 
   const set = (k) => (v) => setSettings((p) => ({ ...p, [k]: v }));
+  const switchUnit = () => setSettings((p) => {
+    const to = p.unit === 'kmh' ? 'mph' : 'kmh';
+    return { ...p, unit: to, ...convertRange(p.minSpeed, p.maxSpeed, to) };
+  });
   const unit = settings.unit;
   const shownSpeed = convertSpeed(speed, unit);
   const kmh = unit === 'kmh';
@@ -166,7 +188,7 @@ export default function App() {
   const pct = (v) => `${Math.round(v * 100)}%`;
 
   return (
-    <SafeAreaView style={s.safe}>
+    <View style={s.safe}>
       <StatusBar style="light" />
       <ScrollView contentContainerStyle={s.wrap}>
         <View style={s.topBar}>
@@ -220,7 +242,7 @@ export default function App() {
         </Pressable>
 
         <Heading jp="速度" en="SPEED RANGE" />
-        <Pressable style={s.row} onPress={() => set('unit')(kmh ? 'mph' : 'kmh')}>
+        <Pressable style={s.row} onPress={switchUnit}>
           <Text style={s.rowLabel}>UNITS</Text>
           <Text style={[s.rowValue, { minWidth: 120 }]}>{UNIT_LABEL[unit]} ⇄</Text>
         </Pressable>
@@ -240,13 +262,13 @@ export default function App() {
         </Text>
       </ScrollView>
       <TapeOverlay running={running} />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
-  wrap: { padding: 18, paddingTop: 44, paddingBottom: 110 },
+  wrap: { padding: 18, paddingTop: 88, paddingBottom: 110 },
   scan: { height: 1, marginBottom: 3, backgroundColor: '#000', opacity: 0.2 },
   osd: { position: 'absolute', color: C.tape, fontFamily: MONO, fontSize: 15, fontWeight: '700', letterSpacing: 1, opacity: 0.85, textShadowColor: '#000', textShadowRadius: 2, textShadowOffset: { width: 1, height: 1 } },
 

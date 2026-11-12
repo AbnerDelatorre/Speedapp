@@ -22,6 +22,7 @@ export const state = {
   settings: { ...DEFAULT_SETTINGS },
   lastSet: -1,
   lastTick: 0,
+  savedVolume: null, // phone volume before Start, restored on Stop
 };
 
 /** Recompute the target volume and apply it to the system volume. Safe to call often. */
@@ -30,6 +31,8 @@ export function tick() {
   const now = Date.now();
   if (now - state.lastTick < 150) return;
   state.lastTick = now;
+  // GPS went quiet (tunnel, lost signal): don't keep acting on a stale acceleration.
+  if (state.lastFix && now - state.lastFix > 3000) state.accel = smooth(state.accel, 0, 0.3);
   const target = targetVolume(convertSpeed(state.speed, state.settings.unit), state.g, state.settings);
   state.volume = smooth(state.volume, target, 0.25);
   if (Math.abs(state.volume - state.lastSet) >= 0.01) {
@@ -56,6 +59,14 @@ TaskManager.defineTask(TASK, ({ data, error }) => {
   }
 });
 
+/** Stop a location task left running by a previous launch (the UI always starts in standby). */
+export async function cleanupStale() {
+  if (state.running) return;
+  if (await Location.hasStartedLocationUpdatesAsync(TASK).catch(() => false)) {
+    await Location.stopLocationUpdatesAsync(TASK).catch(() => {});
+  }
+}
+
 let accSub = null;
 let motionSub = null;
 let timer = null;
@@ -67,6 +78,12 @@ export async function start() {
   await Location.requestBackgroundPermissionsAsync().catch(() => {});
 
   await VolumeManager.showNativeVolumeUI({ enabled: false }).catch(() => {});
+  const current = await VolumeManager.getVolume().catch(() => null);
+  if (current && typeof current.volume === 'number') {
+    state.savedVolume = current.volume;
+    state.volume = current.volume; // glide from where the phone is now, no jump
+  }
+  state.lastSet = -1;
   await Location.startLocationUpdatesAsync(TASK, {
     accuracy: Location.Accuracy.BestForNavigation,
     activityType: Location.ActivityType.AutomotiveNavigation,
@@ -103,6 +120,12 @@ export async function stop() {
   if (await Location.hasStartedLocationUpdatesAsync(TASK).catch(() => false)) {
     await Location.stopLocationUpdatesAsync(TASK);
   }
+  if (state.savedVolume != null) {
+    await VolumeManager.setVolume(state.savedVolume, { showUI: false }).catch(() => {});
+    state.volume = state.savedVolume;
+    state.savedVolume = null;
+  }
+  await VolumeManager.showNativeVolumeUI({ enabled: true }).catch(() => {});
   state.speed = 0; state.g = 0; state.accel = 0; state.latG = 0; state.lastFix = 0; state.hasMotion = false;
 }
 

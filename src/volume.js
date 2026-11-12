@@ -10,6 +10,14 @@ export function convertSpeed(ms, unit) {
   return ms * (unit === 'mph' ? MS_TO_MPH : MS_TO_KMH);
 }
 
+/** Convert the speed limits when switching units, snapped to the 5-unit steps the UI uses. */
+export function convertRange(minSpeed, maxSpeed, toUnit) {
+  const f = toUnit === 'mph' ? MS_TO_MPH / MS_TO_KMH : MS_TO_KMH / MS_TO_MPH;
+  const snap = (x) => Math.round((x * f) / 5) * 5;
+  const lo = Math.max(0, snap(minSpeed));
+  return { minSpeed: lo, maxSpeed: Math.max(lo + 5, snap(maxSpeed)) };
+}
+
 /** Dynamic g-force: how far total acceleration is from resting 1 g. */
 export function dynamicG({ x, y, z }) {
   return Math.abs(Math.sqrt(x * x + y * y + z * z) - 1);

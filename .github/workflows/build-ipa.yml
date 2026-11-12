@@ -4,6 +4,11 @@ on:
   push:
     branches: [claude/iphone-15-pro-max-app-aelqje]
 
+# Only build the newest commit; cancel builds of older pushes.
+concurrency:
+  group: build-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-latest

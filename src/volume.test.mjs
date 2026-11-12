@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { longitudinalAccel, totalG, G0, targetVolume, dynamicG, smooth, convertSpeed, DEFAULT_SETTINGS as S } from './volume.js';
+import { convertRange, longitudinalAccel, totalG, G0, targetVolume, dynamicG, smooth, convertSpeed, DEFAULT_SETTINGS as S } from './volume.js';
 
 assert.equal(targetVolume(0, 0, S), 0.2);
 assert.equal(targetVolume(100, 0, S), 1);
@@ -16,4 +16,7 @@ assert.equal(longitudinalAccel(13, 10, 0.5), -6);
 assert.equal(longitudinalAccel(10, 13, 0), 0); // bad dt
 assert.equal(longitudinalAccel(10, 13, 30), 0); // stale sample
 assert.ok(Math.abs(totalG({ x: 0, y: G0, z: 0 }) - 1) < 1e-9);
+assert.deepEqual(convertRange(0, 100, 'mph'), { minSpeed: 0, maxSpeed: 60 });
+assert.deepEqual(convertRange(0, 60, 'kmh'), { minSpeed: 0, maxSpeed: 95 });
+assert.deepEqual(convertRange(5, 6, 'mph'), { minSpeed: 5, maxSpeed: 10 }); // keeps a gap
 console.log('all tests passed');
