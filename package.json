@@ -4,14 +4,15 @@
   "main": "index.js",
   "dependencies": {
     "expo": "~58.0.24",
-    "expo-audio": "^58.0.12",
-    "expo-document-picker": "^58.0.5",
+    "expo-build-properties": "^58.0.12",
     "expo-keep-awake": "^58.0.4",
     "expo-location": "^58.0.21",
     "expo-sensors": "^58.0.5",
     "expo-status-bar": "~58.0.5",
+    "expo-task-manager": "^58.0.14",
     "react": "19.3.0",
-    "react-native": "0.88.1"
+    "react-native": "0.88.1",
+    "react-native-volume-manager": "^2.2.0"
   },
   "scripts": {
     "start": "expo start",

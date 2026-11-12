@@ -1,0 +1,36 @@
+name: Build unsigned IPA
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/iphone-15-pro-max-app-aelqje]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Generate native iOS project
+        run: npx expo prebuild --platform ios --no-install && cd ios && pod install
+      - name: Build (unsigned)
+        run: |
+          cd ios
+          WS=$(ls -d *.xcworkspace | head -1)
+          SCHEME="${WS%.xcworkspace}"
+          xcodebuild -workspace "$WS" -scheme "$SCHEME" -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tail -n 40
+      - name: Package IPA
+        run: |
+          mkdir Payload
+          cp -R ios/build/Build/Products/Release-iphoneos/*.app Payload/
+          zip -qr Speedapp.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Speedapp-ipa
+          path: Speedapp.ipa

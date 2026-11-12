@@ -1,14 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import * as Location from 'expo-location';
-import { Accelerometer } from 'expo-sensors';
-import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
-import * as DocumentPicker from 'expo-document-picker';
 import { useKeepAwake } from 'expo-keep-awake';
-import {
-  DEFAULT_SETTINGS, clamp, convertSpeed, dynamicG, smooth, targetVolume,
-} from './src/volume';
+import { DEFAULT_SETTINGS, clamp, convertSpeed } from './src/volume';
+import { start, state, stop } from './src/engine';
 
 const UNIT_LABEL = { kmh: 'km/h', mph: 'mph' };
 
@@ -27,73 +22,26 @@ function Stepper({ label, value, step, min, max, format, onChange }) {
 export default function App() {
   useKeepAwake();
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-  const [speed, setSpeed] = useState(0); // m/s
+  const [running, setRunning] = useState(false);
+  const [speed, setSpeed] = useState(0);
   const [g, setG] = useState(0);
   const [volume, setVolume] = useState(DEFAULT_SETTINGS.minVolume);
-  const [track, setTrack] = useState(null);
-  const [playing, setPlaying] = useState(false);
   const [error, setError] = useState(null);
 
-  const player = useRef(null);
-  const live = useRef({ speed: 0, g: 0, settings, volume: DEFAULT_SETTINGS.minVolume });
-  live.current.settings = settings;
+  state.settings = settings;
 
-  // Sensors: GPS speed + accelerometer g-force.
+  // Refresh the on-screen numbers (the engine itself runs in src/engine.js).
   useEffect(() => {
-    let locSub; let accSub; let cancelled = false;
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') { setError('Location permission is needed to read your speed.'); return; }
-      const sub = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 500, distanceInterval: 0 },
-        (loc) => {
-          const v = loc.coords.speed; // m/s, negative when unknown
-          live.current.speed = v != null && v > 0 ? v : 0;
-        },
-        (e) => setError(String(e)),
-      );
-      if (cancelled) sub.remove(); else locSub = sub;
-    })();
-    Accelerometer.setUpdateInterval(100);
-    accSub = Accelerometer.addListener((a) => { live.current.g = dynamicG(a); });
-    return () => { cancelled = true; locSub?.remove(); accSub?.remove(); };
-  }, []);
-
-  // Control loop: ~10 Hz, smooths the volume and applies it to the player.
-  useEffect(() => {
-    const id = setInterval(() => {
-      const L = live.current;
-      const unitSpeed = convertSpeed(L.speed, L.settings.unit);
-      const target = targetVolume(unitSpeed, L.g, L.settings);
-      L.volume = smooth(L.volume, target, 0.2);
-      if (player.current) player.current.volume = L.volume;
-      setSpeed(L.speed); setG(L.g); setVolume(L.volume);
-    }, 100);
+    const id = setInterval(() => { setSpeed(state.speed); setG(state.g); setVolume(state.volume); }, 150);
     return () => clearInterval(id);
   }, []);
 
-  useEffect(() => () => player.current?.remove?.(), []);
-
-  async function pickTrack() {
-    const res = await DocumentPicker.getDocumentAsync({ type: 'audio/*', copyToCacheDirectory: true });
-    if (res.canceled) return;
-    const file = res.assets[0];
-    await setAudioModeAsync({ playsInSilentMode: true, shouldPlayInBackground: true });
-    player.current?.remove?.();
-    const p = createAudioPlayer({ uri: file.uri });
-    p.loop = true;
-    p.volume = live.current.volume;
-    player.current = p;
-    setTrack(file.name);
-    p.play();
-    setPlaying(true);
-  }
-
-  function togglePlay() {
-    const p = player.current;
-    if (!p) return;
-    if (playing) p.pause(); else p.play();
-    setPlaying(!playing);
+  async function toggle() {
+    setError(null);
+    try {
+      if (running) { await stop(); setRunning(false); }
+      else { await start(); setRunning(true); }
+    } catch (e) { setError(String(e.message ?? e)); }
   }
 
   const set = (k) => (v) => setSettings((p) => ({ ...p, [k]: v }));
@@ -110,20 +58,15 @@ export default function App() {
 
         <View style={s.cards}>
           <View style={s.card}><Text style={s.cardLabel}>G-FORCE</Text><Text style={s.cardValue}>{g.toFixed(2)} g</Text></View>
-          <View style={s.card}><Text style={s.cardLabel}>VOLUME</Text><Text style={s.cardValue}>{pct(volume)}</Text></View>
+          <View style={s.card}><Text style={s.cardLabel}>PHONE VOLUME</Text><Text style={s.cardValue}>{pct(volume)}</Text></View>
         </View>
         <View style={s.bar}><View style={[s.barFill, { width: pct(volume) }]} /></View>
 
         {error && <Text style={s.error}>{error}</Text>}
 
-        <View style={s.cards}>
-          <Pressable style={[s.big, { flex: 2 }]} onPress={pickTrack}>
-            <Text style={s.bigText} numberOfLines={1}>{track ?? 'Choose a song'}</Text>
-          </Pressable>
-          <Pressable style={[s.big, !track && s.disabled]} onPress={togglePlay} disabled={!track}>
-            <Text style={s.bigText}>{playing ? 'Pause' : 'Play'}</Text>
-          </Pressable>
-        </View>
+        <Pressable style={[s.big, running && s.stop]} onPress={toggle}>
+          <Text style={s.bigText}>{running ? 'Stop controlling volume' : 'Start'}</Text>
+        </Pressable>
 
         <Text style={s.section}>Speed range</Text>
         <Pressable style={s.row} onPress={() => set('unit')(unit === 'kmh' ? 'mph' : 'kmh')}>
@@ -159,9 +102,9 @@ const s = StyleSheet.create({
   cardValue: { color: '#fff', fontSize: 28, fontWeight: '700', marginTop: 4 },
   bar: { height: 10, backgroundColor: '#161a23', borderRadius: 5, overflow: 'hidden', marginBottom: 20 },
   barFill: { height: '100%', backgroundColor: '#4f8cff' },
-  big: { flex: 1, backgroundColor: '#4f8cff', borderRadius: 14, padding: 16, alignItems: 'center', justifyContent: 'center' },
+  big: { marginBottom: 12, backgroundColor: '#4f8cff', borderRadius: 14, padding: 16, alignItems: 'center', justifyContent: 'center' },
   bigText: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  disabled: { opacity: 0.4 },
+  stop: { backgroundColor: '#d9534f' },
   section: { color: '#8b93a7', fontSize: 13, letterSpacing: 1, textTransform: 'uppercase', marginTop: 20, marginBottom: 8 },
   row: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#161a23', borderRadius: 12, padding: 12, marginBottom: 8 },
   rowLabel: { color: '#fff', fontSize: 16, flex: 1 },
