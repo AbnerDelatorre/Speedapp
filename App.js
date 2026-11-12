@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useKeepAwake } from 'expo-keep-awake';
-import { DEFAULT_SETTINGS, clamp, convertSpeed } from './src/volume';
-import { start, state, stop } from './src/engine';
+import { DEFAULT_SETTINGS, G0, clamp, convertSpeed } from './src/volume';
+import { resetPeak, start, state, stop } from './src/engine';
 
 // Palette: late-90s Japanese sports car cabin at night, taped on VHS.
 // Black gauge faces, warm white print, amber illumination, orange needles, green VFD.
@@ -68,6 +68,28 @@ function Gauge({ size, value, max, major, minor, title, unit, band, redFrom, rea
   );
 }
 
+/** G-ball: dot moves with sideways g (left/right) and acceleration/braking (up/down). Rings at 0.5 and 1.0 g. */
+function GBall({ size, lat, long }) {
+  const c = size / 2;
+  const r = c - 8; // 1.0 g radius
+  const mag = Math.hypot(lat, long);
+  const k = mag > 1 ? 1 / mag : 1;
+  const dot = 12;
+  return (
+    <View style={[s.bezel, { width: size + 12, height: size + 12, borderRadius: (size + 12) / 2 }]}>
+      <View style={[s.face, { width: size, height: size, borderRadius: c }]}>
+        <View style={[s.ring, { width: r * 2, height: r * 2, borderRadius: r, left: c - r, top: c - r }]} />
+        <View style={[s.ring, { width: r, height: r, borderRadius: r / 2, left: c - r / 2, top: c - r / 2 }]} />
+        <View style={[s.cross, { left: c - 0.5, top: 8, width: 1, height: size - 16 }]} />
+        <View style={[s.cross, { top: c - 0.5, left: 8, height: 1, width: size - 16 }]} />
+        <Text style={[s.ballTag, { top: 10, alignSelf: 'center' }]}>ACC</Text>
+        <Text style={[s.ballTag, { bottom: 10, alignSelf: 'center' }]}>BRK</Text>
+        <View style={[s.ballDot, { width: dot, height: dot, borderRadius: dot / 2, left: c + lat * k * r - dot / 2, top: c - long * k * r - dot / 2 }]} />
+      </View>
+    </View>
+  );
+}
+
 /** Camcorder on-screen display + scanlines: the whole thing is "taped". */
 function TapeOverlay({ running }) {
   const [now, setNow] = useState(new Date());
@@ -115,6 +137,7 @@ export default function App() {
   const [running, setRunning] = useState(false);
   const [speed, setSpeed] = useState(0);
   const [g, setG] = useState(0);
+  const [m, setM] = useState({ accel: 0, latG: 0, peakG: 0 });
   const [volume, setVolume] = useState(DEFAULT_SETTINGS.minVolume);
   const [error, setError] = useState(null);
 
@@ -122,7 +145,8 @@ export default function App() {
 
   // Refresh the on-screen numbers (the engine itself runs in src/engine.js).
   useEffect(() => {
-    const id = setInterval(() => { setSpeed(state.speed); setG(state.g); setVolume(state.volume); }, 150);
+    const id = setInterval(() => { setSpeed(state.speed); setG(state.g); setVolume(state.volume);
+      setM({ accel: state.accel, latG: state.latG, peakG: state.peakG }); }, 150);
     return () => clearInterval(id);
   }, []);
 
@@ -138,6 +162,7 @@ export default function App() {
   const unit = settings.unit;
   const shownSpeed = convertSpeed(speed, unit);
   const kmh = unit === 'kmh';
+  const signed = (v, d) => `${v < 0 ? '-' : '+'}${Math.abs(v).toFixed(d)}`;
   const pct = (v) => `${Math.round(v * 100)}%`;
 
   return (
@@ -171,6 +196,18 @@ export default function App() {
               <Text style={s.vfdLabel}>{running ? 'ACTIVE' : 'STANDBY'}</Text>
             </View>
           </View>
+          <View style={s.subRow}>
+            <Pressable onPress={resetPeak}>
+              <GBall size={132} lat={m.latG} long={m.accel / G0} />
+            </Pressable>
+            <View style={s.vfd}>
+              <Text style={s.vfdLabel}>ACCEL m/s²</Text>
+              <Text style={s.vfdValue}>{signed(m.accel, 1)}</Text>
+              <Text style={s.vfdLine}>LONG {signed(m.accel / G0, 2)} G</Text>
+              <Text style={s.vfdLine}>LAT  {signed(m.latG, 2)} G</Text>
+              <Text style={s.vfdLine}>PEAK  {m.peakG.toFixed(2)} G</Text>
+            </View>
+          </View>
         </View>
 
         {error && <Text style={s.error}>! {error}</Text>}
@@ -199,7 +236,7 @@ export default function App() {
         <Stepper label="FULL BOOST AT" value={settings.gFull} step={0.1} min={0.1} max={2} format={(v) => `${v.toFixed(1)} G`} onChange={set('gFull')} />
 
         <Text style={s.hint}>
-          Amber marks on the speedo show your speed range. Volume rises across it; hard braking, acceleration or cornering adds a boost.
+          Amber marks on the speedo show your speed range. The G-ball shows cornering (left/right) and acceleration/braking (up/down); tap it to reset the peak. Mount the phone upright facing you for correct left/right. Volume rises across it; hard braking, acceleration or cornering adds a boost.
         </Text>
       </ScrollView>
       <TapeOverlay running={running} />
@@ -234,6 +271,11 @@ const s = StyleSheet.create({
   vfd: { width: 150, backgroundColor: '#03110d', borderWidth: 2, borderColor: C.bezel, borderRadius: 6, padding: 10 },
   vfdLabel: { color: C.vfd, fontFamily: MONO, fontSize: 9, letterSpacing: 2, opacity: 0.8 },
   vfdValue: { color: C.vfd, fontFamily: MONO, fontSize: 34, fontWeight: '700', fontVariant: ['tabular-nums'], textShadowColor: C.vfd, textShadowRadius: 8, textShadowOffset: { width: 0, height: 0 } },
+  vfdLine: { color: C.vfd, fontFamily: MONO, fontSize: 12, letterSpacing: 1, marginTop: 2, fontVariant: ['tabular-nums'] },
+  ring: { position: 'absolute', borderWidth: 1, borderColor: C.dim, opacity: 0.6 },
+  cross: { position: 'absolute', backgroundColor: C.dim, opacity: 0.4 },
+  ballTag: { position: 'absolute', color: C.dim, fontSize: 8, fontWeight: '700', letterSpacing: 1 },
+  ballDot: { position: 'absolute', backgroundColor: C.needle, shadowColor: C.needle, shadowOpacity: 1, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } },
   vfdBar: { flexDirection: 'row', gap: 2, height: 10, marginVertical: 6 },
   vfdSeg: { flex: 1, backgroundColor: C.vfd },
 

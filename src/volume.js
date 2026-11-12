@@ -15,6 +15,19 @@ export function dynamicG({ x, y, z }) {
   return Math.abs(Math.sqrt(x * x + y * y + z * z) - 1);
 }
 
+export const G0 = 9.80665; // m/s^2 per g
+
+/** Forward acceleration (m/s^2) from two GPS speed samples; + speeding up, - braking. */
+export function longitudinalAccel(prevSpeed, speed, dtSec) {
+  if (!(dtSec > 0.05) || dtSec > 5) return 0;
+  return (speed - prevSpeed) / dtSec;
+}
+
+/** Total g from gravity-free acceleration (m/s^2). */
+export function totalG({ x, y, z }) {
+  return Math.sqrt(x * x + y * y + z * z) / G0;
+}
+
 /**
  * Target volume (0..1) for a speed and g-force.
  * - Speed at/below `minSpeed` -> `minVolume`; at/above `maxSpeed` -> `maxVolume`.
