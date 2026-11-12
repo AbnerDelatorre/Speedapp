@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Speedapp",
+    "slug": "Speedapp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.speedapp.volume",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Speedapp uses your location to read your speed and adjust the music volume.",
+        "NSMotionUsageDescription": "Speedapp uses motion sensors to measure g-force and adjust the music volume.",
+        "UIBackgroundModes": [
+          "audio"
+        ]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
