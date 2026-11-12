@@ -12,6 +12,8 @@ concurrency:
 jobs:
   build:
     runs-on: macos-latest
+    permissions:
+      contents: write # to publish the IPA as a release
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,3 +41,12 @@ jobs:
         with:
           name: Speedapp-ipa
           path: Speedapp.ipa
+      - name: Publish to Releases (easy download link)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest-build --yes --cleanup-tag || true
+          gh release create latest-build Speedapp.ipa \
+            --title "Speedapp latest build" \
+            --notes "Unsigned IPA built from ${GITHUB_SHA}. Sign and install with Sideloadly or AltStore." \
+            --target "$GITHUB_SHA" --prerelease
